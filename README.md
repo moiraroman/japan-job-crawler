@@ -1,123 +1,110 @@
 # Japan Job Crawler
 
-日本招聘信息聚合爬虫——自动化抓取 Indeed Japan、Wantedly、りくナビNEXT、doda、みんなの、就職等主流日本招聘网站的职位信息，支持 SQLite 持久化、CSV/JSON 导出，以及 Web UI 可视化操作。
+An automated job crawler that aggregates listings from major Japanese hiring platforms — Indeed Japan, Wantedly, Rikunabi NEXT, doda, and Mynavi. It uses Playwright for real browser rendering, SQLite for local storage with URL deduplication, and supports CSV/JSON export along with a Web UI for visual task management.
 
-> ⚠️ **免责声明**：本工具仅供个人求职研究和学习使用。请遵守各网站的服务条款和 robots.txt，勿用于商业爬取或高频请求。
-
----
-
-## 主要特性
-
-| 特性 | 说明 |
-|------|------|
-| 🌐 多站点支持 | Indeed、Wantaddy、りくナビNEXT、doda 等（插件式扩展） |
-| 🧠 Playwright 渲染 | 真实浏览器抓取，应对 JS 动态渲染和 Cloudflare |
-| 🤖 人类行为模拟 | 随机延迟、鼠标滚动、随机点击，降低被封概率 |
-| 📊 统一数据模型 | 所有站点统一 `JobInfo` 数据结构 |
-| 🔄 去重 & 持久化 | SQLite 本地存储，基于 URL 自动去重 |
-| 📤 导出 | 支持 CSV（Excel 兼容）和 JSON 导出 |
-| 🖥️ Web UI | 启动本地 Web 界面，可视化配置爬虫任务 |
-| ⏰ 定时任务 | 支持设置定时爬取间隔 |
-| 🔌 REST API | FastAPI 提供查询/统计/导出接口 |
+> **Disclaimer**: This tool is intended for personal job search and research only. Please respect each site's Terms of Service and `robots.txt`. Do not use for commercial scraping or high-frequency requests.
 
 ---
 
-## 架构
+## Features
+
+- **Multi-site support** — Indeed, Wantedly, Rikunabi, doda, Mynavi (pluggable architecture)
+- **Real browser rendering** — Playwright handles JavaScript-heavy pages and Cloudflare challenges
+- **Human behavior simulation** — Random delays, mouse scrolling, and click patterns to reduce detection
+- **Unified data model** — All sites produce a standard `JobInfo` structure
+- **Deduplication & persistence** — SQLite storage with automatic URL-based deduplication
+- **Export** — CSV (Excel-compatible) and JSON
+- **Web UI** — Local dashboard at `http://localhost:8080` to configure and monitor crawls
+- **REST API** — FastAPI endpoints for queries, stats, and export (`http://localhost:8000`)
+- **Scheduled crawling** — Built-in interval-based scheduling
+
+---
+
+## Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│          main.py / webui.py / api.py        │
-│        (CLI · Web UI · REST API)            │
-└──────────────────────┬──────────────────────┘
+┌──────────────────────────────────────────────┐
+│         main.py / webui.py / api.py          │
+│           (CLI · Web UI · REST API)           │
+└──────────────────────┬───────────────────────┘
                        │
-┌──────────────────────▼──────────────────────┐
-│              Scheduler                       │
-│         频率控制 · 任务队列 · 重试             │
-└──────────────────────┬──────────────────────┘
+┌──────────────────────▼───────────────────────┐
+│                 Scheduler                     │
+│     Rate limiting · Task queue · Retries      │
+└──────────────────────┬───────────────────────┘
                        │
-┌──────────────────────▼──────────────────────┐
-│         Spider Layer (站点适配)               │
-│  IndeedSpider · WantedlySpider · RikunabiSpider …
-└──────┬───────────────────┬───────────────────┘
-       │                   │
-┌──────▼──────┐   ┌────────▼────────┐
-│  Fetcher    │   │     Parser       │
-│ (Playwright)│   │ (lxml + BS4)     │
-└──────┬──────┘   └────────┬────────┘
-       │                   │
-       └────────┬──────────┘
-                │
-       ┌────────▼────────┐
-       │     Storage      │
-       │    (SQLite)      │
-       └──────────────────┘
+┌──────────────────────▼───────────────────────┐
+│           Spider Layer (per-site)             │
+│  IndeedSpider · WantedlySpider · Rikunabi …  │
+└──────┬─────────────────────┬─────────────────┘
+       │                     │
+┌──────▼──────┐    ┌─────────▼────────┐
+│   Fetcher   │    │     Parser       │
+│ (Playwright)│    │ (lxml + BS4)     │
+└──────┬──────┘    └─────────┬────────┘
+       │                     │
+       └──────────┬──────────┘
+                  │
+         ┌────────▼────────┐
+         │     Storage      │
+         │    (SQLite)      │
+         └─────────────────┘
 ```
 
 ---
 
-## 支持的站点
+## Supported Sites
 
-| 站点 | 反爬难度 | 数据质量 | 备注 |
-|------|----------|----------|------|
-| Indeed Japan | ★★★☆☆ | ★★☆☆☆ | 数据量最大 |
-| Wantedly | ★★☆☆☆ | ★★★★☆ | IT/Startup 公司为主 |
-| りくナビNEXT | ★★★★☆ | ★★★★☆ | 高质量企业直招 |
-| doda | ★★★☆☆ | ★★★★☆ | 职位详情丰富 |
-| みんなの就職 | ★★★☆☆ | ★★★☆☆ | 传统企业为主 |
+| Site | Anti-bot Difficulty | Data Quality | Notes |
+|------|--------------------:|:------------:|-------|
+| Indeed Japan | ★★★☆☆ | ★★☆☆☆ | Largest volume |
+| Wantedly | ★★☆☆☆ | ★★★★☆ | IT / Startup focused |
+| Rikunabi NEXT | ★★★★☆ | ★★★★☆ | High-quality direct listings |
+| doda | ★★★☆☆ | ★★★★☆ | Rich job details |
+| Mynavi | ★★★☆☆ | ★★★☆☆ | Traditional enterprise sector |
 
 ---
 
-## 安装
+## Installation
 
-### 环境要求
-
-- Python 3.11+
-- Windows / macOS / Linux
-
-### 步骤
+**Requirements:** Python 3.11+ · Windows / macOS / Linux
 
 ```bash
-# 1. 克隆仓库
 git clone https://github.com/moiraroman/japan-job-crawler.git
 cd japan-job-crawler
 
-# 2. 创建虚拟环境（推荐）
+# (Recommended) Create a virtual environment
 python -m venv venv
-# Windows
-venv\Scripts\activate
-# macOS / Linux
-source venv/bin/activate
+source venv/bin/activate        # Linux / macOS
+venv\Scripts\activate           # Windows
 
-# 3. 安装依赖
 pip install -r requirements.txt
-
-# 4. 安装 Playwright 浏览器
 playwright install chromium
 ```
 
 ---
 
-## 快速开始
+## Quick Start
 
-### CLI 爬取
+### CLI
 
 ```bash
-# 爬取所有站点（默认关键词）
+# Crawl all sites with default keywords
 python main.py
 
-# 指定站点
+# Target specific sites
 python main.py --sites indeed_jp wantedly
 
-# 自定义关键词和地点
-python main.py --keywords "Python エンジニア" "Web エンジニア" --locations "東京都" "大阪府"
+# Custom keywords and locations
+python main.py --keywords "Python engineer" "Web developer" --locations "Tokyo" "Osaka"
 
-# 限制页数
+# Limit pages per site
 python main.py --max-pages 3
 
-# 显示浏览器（调试用）
+# Show browser window (for debugging)
 python main.py --headed
 
-# 试运行（不保存数据）
+# Dry run — no data saved
 python main.py --dry-run
 ```
 
@@ -125,104 +112,98 @@ python main.py --dry-run
 
 ```bash
 python webui.py
-# 浏览器打开 http://localhost:8080
+# Open http://localhost:8080 in your browser
 ```
 
-### API 服务
+### REST API
 
 ```bash
 python api.py
-# 启动后访问 http://localhost:8000/docs 查看接口文档
+# Swagger docs at http://localhost:8000/docs
 ```
 
-### 定时爬取
+### Scheduled Crawling
 
 ```bash
-# 每 6 小时执行一次
+# Run every 6 hours
 python main.py --schedule --interval 6
 ```
 
-### 导出数据
+### Export
 
 ```bash
-# CSV 导出
 python main.py --export-csv output/jobs.csv
-
-# JSON 导出
 python main.py --export-json output/jobs.json
-
-# 按来源筛选
 python main.py --export-csv output/wantedly.csv --sites wantedly
 ```
 
 ---
 
-## 项目结构
+## Project Structure
 
 ```
 japan-job-crawler/
-├── main.py                    # CLI 入口
-├── webui.py                   # Web UI 入口 (端口 8080)
-├── api.py                     # FastAPI 服务 (端口 8000)
-├── scheduler.py               # 任务调度器
-├── test_crawler.py            # 集成测试
-├── verify.py                  # 配置验证
-├── requirements.txt           # 依赖清单
-├── .gitignore
+├── main.py                    # CLI entry point
+├── webui.py                   # Web UI server  (port 8080)
+├── api.py                     # FastAPI server (port 8000)
+├── scheduler.py               # Task scheduler
+├── test_crawler.py            # Integration tests
+├── verify.py                  # Config validation
+├── requirements.txt
 ├── README.md
-├── DESIGN.md                  # 产品设计文档
+├── DESIGN.md                  # Product design document
 ├── config/
-│   ├── settings.py            # 站点配置 & 全局参数
+│   ├── settings.py            # Site configs & global settings
 │   └── __init__.py
 ├── fetcher/
-│   ├── browser_fetcher.py     # Playwright 封装
+│   ├── browser_fetcher.py     # Playwright wrapper
 │   └── __init__.py
 ├── parser/
-│   ├── html_parser.py         # HTML 解析器（各站点适配）
+│   ├── html_parser.py         # Per-site HTML parsers
 │   └── __init__.py
 ├── spiders/
-│   ├── base_spider.py         # Spider 基类
-│   ├── mynavi_spider.py       # みんなの就職 Spider
+│   ├── base_spider.py         # Base spider class
+│   ├── mynavi_spider.py       # Mynavi spider
 │   └── __init__.py
 ├── storage/
-│   ├── db.py                  # SQLite 操作
+│   ├── db.py                  # SQLite operations
 │   └── __init__.py
-├── webui_templates/           # Jinja2 模板
-├── webui_static/              # CSS / JS
-└── data/                      # 数据库 & 导出目录
+├── webui_templates/           # Jinja2 templates
+├── webui_static/              # CSS / JS assets
+└── data/                      # Database & export directory
 ```
 
 ---
 
-## 数据模型
+## Data Model
 
 ```python
 @dataclass
 class JobInfo:
-    title: str           # 职位名称
-    company: str         # 公司名称
-    location: str        # 工作地点
-    salary: str          # 薪资
-    employment_type: str # 雇佣形态（正社員 / 契約社員 等）
-    description: str    # 职位描述
-    requirements: str   # 要求条件
-    url: str             # 详情页 URL（唯一标识，去重依据）
-    source: str          # 来源站点
-    posted_date: str     # 发布日期
+    title: str           # Job title
+    company: str         # Company name
+    location: str        # Work location
+    salary: str          # Salary range
+    employment_type: str # Employment type (full-time, contract, etc.)
+    description: str     # Job description
+    requirements: str    # Requirements
+    url: str             # Detail page URL (unique key for dedup)
+    source: str          # Source site name
+    posted_date: str     # Posting date
 ```
 
 ---
 
-## 添加新站点
+## Adding a New Site
 
-1. 在 `config/settings.py` 添加站点配置
-2. 在 `parser/html_parser.py` 添加解析器
-3. 在 `spiders/base_spider.py` 添加 Spider 类
+1. Add site configuration in `config/settings.py`
+2. Implement a parser in `parser/html_parser.py`
+3. Create a spider class in `spiders/base_spider.py`
 
-详细步骤见 `DESIGN.md`。
+See `DESIGN.md` for detailed instructions.
 
 ---
 
 ## License
 
-MIT License - 仅供学习和个人使用，禁止商业用途。
+MIT License — For learning and personal use only. Commercial use is prohibited.
