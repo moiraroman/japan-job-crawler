@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>爬虫控制 - 日本招聘爬虫</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <a href="/" class="navbar-brand">
+            <span>🕷️</span> 日本招聘爬虫
+        </a>
+        <ul class="navbar-nav">
+            <li><a href="/">职位列表</a></li>
+            <li><a href="/dashboard">仪表盘</a></li>
+            <li><a href="/crawler" class="active">爬虫控制</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <!-- Status Card -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">⚙️ 爬虫状态</h2>
+                <span id="statusBadge" class="badge badge-success">空闲</span>
+            </div>
+            <div id="progressSection" style="display:none">
+                <div class="flex justify-between items-center mb-2">
+                    <span id="progressText">正在爬取...</span>
+                    <span id="progressPercent">0%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width:0%"></div>
+                </div>
+                <div class="flex justify-between mt-1">
+                    <span class="text-sm text-light" id="progressDetail">-</span>
+                </div>
+            </div>
+            <div class="flex gap-1 mt-2">
+                <button id="startBtn" class="btn btn-success" onclick="startCrawler()">▶ 开始爬取</button>
+                <button id="stopBtn" class="btn btn-danger" onclick="stopCrawler()" disabled>■ 停止</button>
+                <button class="btn btn-outline" onclick="refreshStatus()">🔄 刷新状态</button>
+            </div>
+        </div>
+
+        <!-- Crawler Config -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">📋 爬取配置</h2>
+            </div>
+            <div class="grid-2">
+                <div class="form-group">
+                    <label class="form-label">目标站点 *</label>
+                    <div class="flex flex-wrap gap-1" style="margin-bottom:0.5rem">
+                        <button class="btn btn-outline btn-sm" onclick="toggleAllSites(true)">全选</button>
+                        <button class="btn btn-outline btn-sm" onclick="toggleAllSites(false)">全取消</button>
+                    </div>
+                    <div id="siteCheckboxes" class="flex flex-wrap gap-1"></div>
+                </div>
+                <div>
+                    <div class="form-group">
+                        <label class="form-label">搜索关键词</label>
+                        <textarea id="keywordsInput" class="form-input" rows="4" 
+                                  placeholder="每行一个关键词&#10;例如:&#10;エンジニア&#10;プログラマー&#10;IT"></textarea>
+                        <div class="text-sm text-light mt-1">每行一个关键词</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">每站点最大页数</label>
+                        <input type="number" id="maxPagesInput" class="form-input" value="3" min="1" max="20">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">🚀 快速操作</h2>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <button class="btn btn-outline" onclick="quickStart(['indeed_jp', 'wantedly'], ['エンジニア', 'プログラマー'])">
+                    🔍 IT职位（Indeed + Wantedly）
+                </button>
+                <button class="btn btn-outline" onclick="quickStart(['rikunabi', 'doda', 'mynavi'], ['エンジニア'])">
+                    🔍 全站点工程师搜索
+                </button>
+                <button class="btn btn-outline" onclick="quickStart(['indeed_jp'], ['東京', '大阪', '名古屋'])">
+                    🔍 按地点搜索（Indeed）
+                </button>
+            </div>
+        </div>
+
+        <!-- Tips -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">💡 使用提示</h2>
+            </div>
+            <ul class="text-light" style="padding-left:1.5rem">
+                <li>爬虫会模拟人类行为，避免被反爬机制拦截</li>
+                <li>建议每次爬取间隔5分钟以上，避免对目标网站造成压力</li>
+                <li>Cloudflare保护站点需要更长的等待时间</li>
+                <li>数据会自动去重，重复运行不会产生重复记录</li>
+                <li>可以随时点击"停止"中断爬取</li>
+            </ul>
+        </div>
+    </div>
+
+    <div id="toast" class="toast" style="display:none"></div>
+
+    <script>
+        const sites = {{ sites | tojson | safe }};
+
+        function init() {
+            // Render site checkboxes
+            const container = document.getElementById('siteCheckboxes');
+            container.innerHTML = Object.entries(sites).map(([id, site]) => `
+                <label style="display:flex;align-items:center;gap:0.25rem;padding:0.5rem 0.75rem;background:var(--bg);border-radius:6px;cursor:pointer">
+                    <input type="checkbox" id="site_${id}" value="${id}" checked style="width:16px;height:16px">
+                    <span style="font-size:0.875rem">${site.name}</span>
+                </label>
+            `).join('');
+
+            refreshStatus();
+            setInterval(refreshStatus, 3000);
+        }
+
+        function toggleAllSites(checked) {
+            Object.keys(sites).forEach(id => {
+                document.getElementById(`site_${id}`).checked = checked;
+            });
+        }
+
+        function getSelectedSites() {
+            return Object.keys(sites).filter(id => document.getElementById(`site_${id}`).checked);
+        }
+
+        function getKeywords() {
+            const text = document.getElementById('keywordsInput').value;
+            return text.split('\n').map(k => k.trim()).filter(k => k);
+        }
+
+        async function startCrawler() {
+            const selectedSites = getSelectedSites();
+            const keywords = getKeywords();
+
+            if (selectedSites.length === 0) {
+                showToast('请选择至少一个站点', 'error');
+                return;
+            }
+
+            if (keywords.length === 0) {
+                showToast('请输入至少一个关键词', 'error');
+                return;
+            }
+
+            const maxPages = parseInt(document.getElementById('maxPagesInput').value) || 3;
+
+            try {
+                const res = await fetch('/api/crawler/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sites: selectedSites,
+                        keywords: keywords,
+                        max_pages: maxPages
+                    })
+                });
+                const data = await res.json();
+                showToast(data.message, 'success');
+                refreshStatus();
+            } catch (err) {
+                showToast('启动失败: ' + err.message, 'error');
+            }
+        }
+
+        async function stopCrawler() {
+            try {
+                const res = await fetch('/api/crawler/stop', { method: 'POST' });
+                const data = await res.json();
+                showToast(data.message, 'info');
+                refreshStatus();
+            } catch (err) {
+                showToast('停止失败: ' + err.message, 'error');
+            }
+        }
+
+        async function refreshStatus() {
+            try {
+                const res = await fetch('/api/crawler/status');
+                const data = await res.json();
+
+                const isRunning = data.is_running;
+                const progress = data.progress;
+
+                // Update buttons
+                document.getElementById('startBtn').disabled = isRunning;
+                document.getElementById('stopBtn').disabled = !isRunning;
+
+                // Update status badge
+                const badge = document.getElementById('statusBadge');
+                if (isRunning) {
+                    badge.className = 'badge badge-warning';
+                    badge.textContent = '运行中';
+                } else {
+                    badge.className = 'badge badge-success';
+                    badge.textContent = '空闲';
+                }
+
+                // Update progress
+                const progressSection = document.getElementById('progressSection');
+                if (isRunning) {
+                    progressSection.style.display = 'block';
+                    const percent = progress.total > 0 ? Math.round(progress.completed / progress.total * 100) : 0;
+                    document.getElementById('progressFill').style.width = percent + '%';
+                    document.getElementById('progressPercent').textContent = percent + '%';
+                    document.getElementById('progressText').textContent = `进度: ${progress.completed} / ${progress.total}`;
+                    document.getElementById('progressDetail').textContent = 
+                        `${progress.current_site || '-'} · ${progress.current_keyword || '-'}`;
+                } else {
+                    progressSection.style.display = 'none';
+                }
+            } catch (err) {
+                console.error('Status refresh error:', err);
+            }
+        }
+
+        function quickStart(siteIds, keywords) {
+            // Set sites
+            toggleAllSites(false);
+            siteIds.forEach(id => {
+                const cb = document.getElementById(`site_${id}`);
+                if (cb) cb.checked = true;
+            });
+
+            // Set keywords
+            document.getElementById('keywordsInput').value = keywords.join('\n');
+
+            // Start
+            startCrawler();
+        }
+
+        function showToast(msg, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = `toast toast-${type}`;
+            toast.style.display = 'block';
+            setTimeout(() => toast.style.display = 'none', 3000);
+        }
+
+        init();
+    </script>
+</body>
+</html>

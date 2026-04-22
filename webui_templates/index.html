@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>日本招聘爬虫 - 职位搜索</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <a href="/" class="navbar-brand">
+            <span>🕷️</span> 日本招聘爬虫
+        </a>
+        <ul class="navbar-nav">
+            <li><a href="/" class="active">职位列表</a></li>
+            <li><a href="/dashboard">仪表盘</a></li>
+            <li><a href="/crawler">爬虫控制</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">🔍 搜索职位</h2>
+                <div class="flex gap-1">
+                    <button class="btn btn-outline" onclick="refreshJobs()">🔄 刷新</button>
+                    <button class="btn btn-outline" onclick="exportCSV()">📥 CSV导出</button>
+                </div>
+            </div>
+            <div class="flex gap-2 mb-2">
+                <div class="form-group" style="flex:1; margin:0">
+                    <input type="text" id="searchInput" class="form-input" 
+                           placeholder="搜索职位、公司、地点..." 
+                           onkeyup="handleSearch(event)">
+                </div>
+                <select id="sourceFilter" class="form-input form-select" style="width:200px" onchange="filterJobs()">
+                    <option value="">全部站点</option>
+                    {% for site_id, site_name in site_names.items() %}
+                    <option value="{{ site_name }}">{{ site_name }}</option>
+                    {% endfor %}
+                </select>
+                <select id="limitSelect" class="form-input form-select" style="width:120px" onchange="filterJobs()">
+                    <option value="20">20条/页</option>
+                    <option value="50" selected>50条/页</option>
+                    <option value="100">100条/页</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="statsBar" class="card">
+            <div class="flex justify-between items-center">
+                <span id="resultCount" class="text-light">加载中...</span>
+                <div class="flex gap-1">
+                    <button class="btn btn-outline btn-sm" onclick="prevPage()" id="prevBtn" disabled>← 上一页</button>
+                    <button class="btn btn-outline btn-sm" onclick="nextPage()" id="nextBtn" disabled>下一页 →</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="jobsContainer">
+            <div class="text-center text-light" style="padding:3rem">
+                <div class="loader" style="margin:0 auto 1rem"></div>
+                加载中...
+            </div>
+        </div>
+
+        <div id="pagination" class="flex justify-between items-center mt-2">
+            <span id="pageInfo" class="text-light text-sm"></span>
+            <div class="flex gap-1" id="pageButtons"></div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast" style="display:none"></div>
+
+    <script>
+        // State
+        let currentJobs = [];
+        let currentPage = 0;
+        let pageSize = 50;
+        let totalJobs = 0;
+        let searchQuery = '';
+        let sourceFilter = '';
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadJobs();
+        });
+
+        async function loadJobs() {
+            const container = document.getElementById('jobsContainer');
+            container.innerHTML = '<div class="text-center text-light" style="padding:3rem"><div class="loader" style="margin:0 auto 1rem"></div>加载中...</div>';
+
+            try {
+                let url = `/api/jobs?limit=${pageSize}&offset=${currentPage * pageSize}`;
+                if (sourceFilter) url += `&source=${encodeURIComponent(sourceFilter)}`;
+                
+                const res = await fetch(url);
+                const data = await res.json();
+                
+                currentJobs = data.jobs;
+                totalJobs = data.total;
+                renderJobs(currentJobs);
+                updatePagination();
+            } catch (err) {
+                container.innerHTML = `<div class="text-center text-danger" style="padding:3rem">加载失败: ${err.message}</div>`;
+            }
+        }
+
+        function renderJobs(jobs) {
+            const container = document.getElementById('jobsContainer');
+            
+            if (jobs.length === 0) {
+                container.innerHTML = `
+                    <div class="card text-center" style="padding:3rem">
+                        <div style="font-size:3rem;margin-bottom:1rem">📭</div>
+                        <h3>暂无职位数据</h3>
+                        <p class="text-light mt-1">请先运行爬虫抓取职位数据</p>
+                        <a href="/crawler" class="btn btn-primary mt-2">前往爬虫控制</a>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = jobs.map(job => `
+                <div class="job-card">
+                    <div class="flex justify-between items-center">
+                        <h3 class="job-title">${escapeHtml(job.title || '无标题')}</h3>
+                        <span class="job-source">${escapeHtml(job.source || '未知')}</span>
+                    </div>
+                    <div class="job-meta mt-1">
+                        ${job.company ? `<span>🏢 ${escapeHtml(job.company)}</span>` : ''}
+                        ${job.location ? `<span>📍 ${escapeHtml(job.location)}</span>` : ''}
+                        ${job.salary ? `<span>💰 ${escapeHtml(job.salary)}</span>` : ''}
+                        ${job.posted_date ? `<span>📅 ${escapeHtml(job.posted_date)}</span>` : ''}
+                    </div>
+                    ${job.description ? `<p class="text-light text-sm mt-2" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escapeHtml(job.description)}</p>` : ''}
+                    <div class="flex gap-1 mt-2">
+                        <a href="${job.url}" target="_blank" class="btn btn-outline btn-sm">查看详情 →</a>
+                    </div>
+                </div>
+            `).join('');
+
+            document.getElementById('resultCount').textContent = 
+                `共 ${totalJobs} 条职位，当前显示 ${jobs.length} 条`;
+        }
+
+        function updatePagination() {
+            const totalPages = Math.ceil(totalJobs / pageSize);
+            document.getElementById('pageInfo').textContent = 
+                `第 ${currentPage + 1} / ${totalPages} 页`;
+
+            document.getElementById('prevBtn').disabled = currentPage === 0;
+            document.getElementById('nextBtn').disabled = currentPage >= totalPages - 1;
+
+            // Page buttons
+            const btns = document.getElementById('pageButtons');
+            let html = '';
+            for (let i = 0; i < Math.min(totalPages, 10); i++) {
+                const active = i === currentPage ? 'btn-primary' : 'btn-outline';
+                html += `<button class="btn ${active} btn-sm" onclick="goPage(${i})">${i + 1}</button>`;
+            }
+            btns.innerHTML = html;
+        }
+
+        function goPage(p) {
+            currentPage = p;
+            loadJobs();
+        }
+
+        function prevPage() {
+            if (currentPage > 0) {
+                currentPage--;
+                loadJobs();
+            }
+        }
+
+        function nextPage() {
+            currentPage++;
+            loadJobs();
+        }
+
+        async function handleSearch(e) {
+            if (e.key !== 'Enter') return;
+            searchQuery = document.getElementById('searchInput').value.trim();
+            
+            if (!searchQuery) {
+                loadJobs();
+                return;
+            }
+
+            const container = document.getElementById('jobsContainer');
+            container.innerHTML = '<div class="text-center text-light" style="padding:3rem"><div class="loader" style="margin:0 auto 1rem"></div>搜索中...</div>';
+
+            try {
+                const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}&limit=${pageSize}`);
+                const data = await res.json();
+                currentJobs = data.jobs;
+                totalJobs = data.count;
+                currentPage = 0;
+                renderJobs(currentJobs);
+                updatePagination();
+            } catch (err) {
+                container.innerHTML = `<div class="text-center text-danger" style="padding:3rem">搜索失败: ${err.message}</div>`;
+            }
+        }
+
+        function filterJobs() {
+            sourceFilter = document.getElementById('sourceFilter').value;
+            pageSize = parseInt(document.getElementById('limitSelect').value);
+            currentPage = 0;
+            loadJobs();
+        }
+
+        function refreshJobs() {
+            loadJobs();
+            showToast('已刷新', 'success');
+        }
+
+        async function exportCSV() {
+            try {
+                const res = await fetch('/api/export/csv' + (sourceFilter ? `?source=${encodeURIComponent(sourceFilter)}` : ''));
+                const data = await res.json();
+                if (data.path) {
+                    showToast(`导出成功: ${data.count} 条记录`, 'success');
+                    setTimeout(() => window.open(data.path, '_blank'), 500);
+                }
+            } catch (err) {
+                showToast('导出失败', 'error');
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showToast(msg, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = `toast toast-${type}`;
+            toast.style.display = 'block';
+            setTimeout(() => toast.style.display = 'none', 3000);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>仪表盘 - 日本招聘爬虫</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .source-card {
+            padding: 1rem;
+            border-radius: 8px;
+            background: var(--bg);
+            margin-bottom: 0.5rem;
+        }
+        .source-name { font-weight: 600; margin-bottom: 0.5rem; }
+        .source-bar {
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .source-fill {
+            height: 100%;
+            background: var(--primary);
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <a href="/" class="navbar-brand">
+            <span>🕷️</span> 日本招聘爬虫
+        </a>
+        <ul class="navbar-nav">
+            <li><a href="/">职位列表</a></li>
+            <li><a href="/dashboard" class="active">仪表盘</a></li>
+            <li><a href="/crawler">爬虫控制</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <!-- Stats Cards -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="statTotal">-</div>
+                <div class="stat-label">总职位数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statToday">-</div>
+                <div class="stat-label">今日新增</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statSites">-</div>
+                <div class="stat-label">数据来源</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statCompanies">-</div>
+                <div class="stat-label">涉及公司</div>
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <!-- Source Distribution -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">📊 数据来源分布</h3>
+                </div>
+                <div id="sourceList">
+                    <div class="text-center text-light" style="padding:2rem">
+                        <div class="loader" style="margin:0 auto"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Jobs -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">🕐 最新职位</h3>
+                    <a href="/" class="btn btn-outline btn-sm">查看全部 →</a>
+                </div>
+                <div id="recentJobs">
+                    <div class="text-center text-light" style="padding:2rem">
+                        <div class="loader" style="margin:0 auto"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sites Status -->
+        <div class="card mt-2">
+            <div class="card-header">
+                <h3 class="card-title">🌐 支持的站点</h3>
+            </div>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>站点</th>
+                            <th>URL</th>
+                            <th>请求间隔</th>
+                            <th>Cloudflare</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sitesTable">
+                        <tr><td colspan="5" class="text-center text-light">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function loadDashboard() {
+            try {
+                // Load stats
+                const statsRes = await fetch('/api/stats');
+                const stats = await statsRes.json();
+                
+                document.getElementById('statTotal').textContent = stats.total || 0;
+                document.getElementById('statToday').textContent = stats.today || 0;
+                document.getElementById('statSites').textContent = Object.keys(stats.by_source || {}).length;
+                document.getElementById('statCompanies').textContent = stats.by_company ? Object.keys(stats.by_company).length : 0;
+
+                // Source distribution
+                const sourceList = document.getElementById('sourceList');
+                const bySource = stats.by_source || {};
+                const total = stats.total || 1;
+                
+                if (Object.keys(bySource).length === 0) {
+                    sourceList.innerHTML = '<div class="text-center text-light" style="padding:2rem">暂无数据</div>';
+                } else {
+                    sourceList.innerHTML = Object.entries(bySource)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([source, count]) => `
+                            <div class="source-card">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="source-name">${escapeHtml(source)}</span>
+                                    <span class="text-sm">${count} 条 (${Math.round(count/total*100)}%)</span>
+                                </div>
+                                <div class="source-bar">
+                                    <div class="source-fill" style="width:${count/total*100}%"></div>
+                                </div>
+                            </div>
+                        `).join('');
+                }
+
+                // Recent jobs
+                const jobsRes = await fetch('/api/jobs?limit=5');
+                const jobsData = await jobsRes.json();
+                const recentJobs = document.getElementById('recentJobs');
+                
+                if (jobsData.jobs.length === 0) {
+                    recentJobs.innerHTML = '<div class="text-center text-light" style="padding:2rem">暂无职位</div>';
+                } else {
+                    recentJobs.innerHTML = jobsData.jobs.map(job => `
+                        <div class="job-card" style="padding:1rem;margin-bottom:0.5rem">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <div class="font-bold">${escapeHtml(job.title || '无标题')}</div>
+                                    <div class="text-sm text-light">${escapeHtml(job.company || '未知公司')} · ${escapeHtml(job.location || '未知地点')}</div>
+                                </div>
+                                <span class="job-source" style="font-size:0.65rem">${escapeHtml(job.source || '')}</span>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+
+                // Sites table
+                const sitesRes = await fetch('/api/sites');
+                const sites = await sitesRes.json();
+                const tbody = document.getElementById('sitesTable');
+                
+                tbody.innerHTML = Object.entries(sites).map(([id, site]) => `
+                    <tr>
+                        <td><strong>${escapeHtml(site.name)}</strong></td>
+                        <td class="hide-mobile"><a href="${escapeHtml(site.base_url)}" target="_blank" class="text-primary">${escapeHtml(site.base_url)}</a></td>
+                        <td>${site.rate_limit}秒</td>
+                        <td>${site.has_cloudflare ? '<span class="badge badge-warning">有</span>' : '<span class="badge badge-success">无</span>'}</td>
+                        <td><a href="${escapeHtml(site.base_url)}" target="_blank" class="btn btn-outline btn-sm">访问 →</a></td>
+                    </tr>
+                `).join('');
+
+            } catch (err) {
+                console.error('Dashboard load error:', err);
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        loadDashboard();
+    </script>
+</body>
+</html>
